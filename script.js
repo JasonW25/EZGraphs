@@ -10,6 +10,7 @@ let isFullscreen = false; // Track fullscreen state
 let normalizeColors = false; // Track if colors should be normalized
 let colorMinValue = null; // Min value for color normalization
 let colorMaxValue = null; // Max value for color normalization
+let colorMidpoint = 0; // Midpoint for color normalization (0 = automatic, default at zero)
 
 // DOM elements
 const csvFileInput = document.getElementById('csv-file');
@@ -23,6 +24,7 @@ const colorNormalizeCheckbox = document.getElementById('color-normalize');
 const normalizeRange = document.getElementById('normalize-range');
 const minValueInput = document.getElementById('min-value');
 const maxValueInput = document.getElementById('max-value');
+const midpointValueInput = document.getElementById('midpoint-value');
 const graphTypeSelect = document.getElementById('graph-type');
 const generateGraphBtn = document.getElementById('generate-graph');
 const graphCanvas = document.getElementById('graph');
@@ -452,7 +454,7 @@ function updateScatterWithColorGroups(chartInstance, visibleData, visibleColorDa
 // Function to update scatter with normalized colors
 function updateScatterWithNormalizedColors(chart, yValues, colorValues, xValues, labels) {
     console.log("Updating scatter with normalized colors:", colorValues?.length, "color values for", yValues.length, "points");
-    console.log("Normalization range:", colorMinValue, "to", colorMaxValue);
+    console.log("Normalization range:", colorMinValue, "to", colorMaxValue, "with midpoint:", colorMidpoint);
     
     if (!colorValues || colorValues.length === 0) {
         console.error("No color values provided for normalization");
@@ -467,13 +469,20 @@ function updateScatterWithNormalizedColors(chart, yValues, colorValues, xValues,
     let minVal = colorMinValue !== null ? colorMinValue : Math.min(...colorValues.filter(v => !isNaN(v)));
     let maxVal = colorMaxValue !== null ? colorMaxValue : Math.max(...colorValues.filter(v => !isNaN(v)));
     
-    console.log("Using color range:", minVal, "to", maxVal);
+    // Determine midpoint if not explicitly set
+    let midVal = colorMidpoint !== 0 ? colorMidpoint : 0;
+    
+    console.log("Using color range:", minVal, "to", maxVal, "with midpoint:", midVal);
     
     // Ensure min/max are different to avoid division by zero
     if (minVal === maxVal) {
         minVal = minVal - 1;
         maxVal = maxVal + 1;
     }
+    
+    // Ensure midpoint is within range
+    if (midVal < minVal) midVal = minVal;
+    if (midVal > maxVal) midVal = maxVal;
     
     // Determine if the range spans across zero (for diverging palette)
     const spanZero = minVal < 0 && maxVal > 0;
@@ -482,6 +491,7 @@ function updateScatterWithNormalizedColors(chart, yValues, colorValues, xValues,
     let negCount = 0;
     let posCount = 0;
     let zeroCount = 0;
+    let midCount = 0;
     
     // Create a new dataset with individual point colors
     for (let i = 0; i < yValues.length; i++) {
@@ -495,26 +505,41 @@ function updateScatterWithNormalizedColors(chart, yValues, colorValues, xValues,
         else if (colorVal > 0) posCount++;
         else zeroCount++;
         
-        // Normalize the color value between min and max
-        let normalizedVal;
+        if (Math.abs(colorVal - midVal) < (maxVal - minVal) * 0.02) midCount++;
         
-        if (spanZero) {
-            // For ranges that cross zero, use diverging palette
-            if (colorVal < 0) {
-                // Negative values should be normalized within their own range
-                normalizedVal = colorVal / Math.min(-0.00001, minVal);
-                // Ensure the values are in -1 to 0 range, with -1 being the most negative
-                normalizedVal = Math.max(-1, Math.min(0, normalizedVal));
+        // Normalize the color value between min and max, considering the midpoint
+        let normalizedVal;
+        let relativeTomidpoint;
+        
+        if (spanZero || colorMidpoint !== 0) {
+            // For ranges that cross zero or have a custom midpoint, use diverging palette
+            if (colorVal < midVal) {
+                // Value is below midpoint - normalize to negative range
+                const lowerRange = midVal - minVal;
+                if (lowerRange <= 0.00001) {
+                    normalizedVal = 0; // To avoid division by zero
+                } else {
+                    normalizedVal = -1 * ((midVal - colorVal) / lowerRange);
+                    // Ensure values are in -1 to 0 range
+                    normalizedVal = Math.max(-1, Math.min(0, normalizedVal));
+                }
             } else {
-                // Positive values should be normalized within their own range
-                normalizedVal = colorVal / Math.max(0.00001, maxVal);
-                // Ensure the values are in 0 to 1 range, with 1 being the most positive
-                normalizedVal = Math.max(0, Math.min(1, normalizedVal));
+                // Value is above midpoint - normalize to positive range
+                const upperRange = maxVal - midVal;
+                if (upperRange <= 0.00001) {
+                    normalizedVal = 0; // To avoid division by zero
+                } else {
+                    normalizedVal = (colorVal - midVal) / upperRange;
+                    // Ensure values are in 0 to 1 range
+                    normalizedVal = Math.max(0, Math.min(1, normalizedVal));
+                }
             }
+            relativeTomidpoint = true;
         } else {
             // For ranges that don't cross zero, use sequential palette
             normalizedVal = (colorVal - minVal) / (maxVal - minVal);
             normalizedVal = Math.max(0, Math.min(1, normalizedVal));
+            relativeTomidpoint = false;
         }
         
         let pointColor;
@@ -523,15 +548,15 @@ function updateScatterWithNormalizedColors(chart, yValues, colorValues, xValues,
         const beyondRange = (colorMinValue !== null && colorVal < colorMinValue) || 
                            (colorMaxValue !== null && colorVal > colorMaxValue);
         
-        // Add a flag to track values near zero for special coloring
-        const nearZero = Math.abs(colorVal) < Math.max(Math.abs(minVal), Math.abs(maxVal)) * 0.1;
+        // Add a flag to track values near midpoint for special coloring
+        const nearMidpoint = Math.abs(colorVal - midVal) < Math.max(Math.abs(maxVal - minVal)) * 0.05;
         
-        if (spanZero) {
-            // Create a diverging palette (blue → gray → red)
-            if (colorVal < 0) {
-                if (nearZero) {
-                    // Values close to zero get a very light blue with gray tint
-                    const intensity = Math.abs(normalizedVal) * 0.5; // Reduced intensity for near-zero
+        if (relativeTomidpoint) {
+            // Create a diverging palette centered at the midpoint
+            if (colorVal < midVal) {
+                if (nearMidpoint) {
+                    // Values close to midpoint get a very light blue with gray tint
+                    const intensity = Math.abs(normalizedVal) * 0.5; // Reduced intensity for near-midpoint
                     pointColor = `rgba(200, 200, 230, ${0.7 + intensity * 0.3})`; // Light blue-gray
                 } else if (beyondRange) {
                     // Values beyond normalization range get darker, more saturated blue
@@ -539,14 +564,14 @@ function updateScatterWithNormalizedColors(chart, yValues, colorValues, xValues,
                 } else {
                     // Normal negative values - blue with intensity based on value
                     const intensity = Math.abs(normalizedVal);
-                    // Use a formula that creates stronger blue for values farther from zero
+                    // Use a formula that creates stronger blue for values farther from midpoint
                     const blueIntensity = 150 + Math.round(105 * intensity);
                     pointColor = `rgba(0, 0, ${blueIntensity}, ${0.6 + intensity * 0.4})`; 
                 }
-            } else if (colorVal > 0) {
-                if (nearZero) {
-                    // Values close to zero get a very light red with gray tint
-                    const intensity = normalizedVal * 0.5; // Reduced intensity for near-zero
+            } else if (colorVal > midVal) {
+                if (nearMidpoint) {
+                    // Values close to midpoint get a very light red with gray tint
+                    const intensity = normalizedVal * 0.5; // Reduced intensity for near-midpoint
                     pointColor = `rgba(230, 200, 200, ${0.7 + intensity * 0.3})`; // Light red-gray
                 } else if (beyondRange) {
                     // Values beyond normalization range get darker, more saturated red
@@ -554,12 +579,12 @@ function updateScatterWithNormalizedColors(chart, yValues, colorValues, xValues,
                 } else {
                     // Normal positive values - red with intensity based on value
                     const intensity = normalizedVal;
-                    // Use a formula that creates stronger red for values farther from zero
+                    // Use a formula that creates stronger red for values farther from midpoint
                     const redIntensity = 150 + Math.round(105 * intensity);
                     pointColor = `rgba(${redIntensity}, 0, 0, ${0.6 + intensity * 0.4})`;
                 }
             } else {
-                // Neutral gray for zero
+                // Exact midpoint gets neutral gray
                 pointColor = 'rgba(200, 200, 200, 0.8)';
             }
         } else if (minVal < 0 && maxVal < 0) {
@@ -620,14 +645,14 @@ function updateScatterWithNormalizedColors(chart, yValues, colorValues, xValues,
             colorValue: colorVal,
             normalizedValue: normalizedVal,
             beyondRange: beyondRange,
-            nearZero: nearZero
+            nearMidpoint: nearMidpoint
         });
         
         pointColors.push(pointColor);
     }
     
     // Debug info
-    console.log(`Color distribution: ${negCount} negative, ${posCount} positive, ${zeroCount} zero`);
+    console.log(`Color distribution: ${negCount} negative, ${posCount} positive, ${zeroCount} zero, ${midCount} near midpoint`);
     console.log("Sample colors generated:", pointColors.slice(0, 5));
     
     // Update the chart's dataset
@@ -645,7 +670,7 @@ function updateScatterWithNormalizedColors(chart, yValues, colorValues, xValues,
     }
     
     // Update or create the color legend to match the updated color scheme
-    updateSeabornStyleLegend(minVal, maxVal, spanZero);
+    updateSeabornStyleLegend(minVal, maxVal, spanZero || colorMidpoint !== 0, midVal);
     
     // Update tooltip callbacks to show color-coded values
     chart.options.plugins.tooltip.callbacks.label = function(context) {
@@ -657,12 +682,12 @@ function updateScatterWithNormalizedColors(chart, yValues, colorValues, xValues,
         let colorStyle = '';
         
         // Style text in tooltip to match point color (simplified for better readability)
-        if (spanZero) {
-            if (colorVal < 0) {
-                // Blue for negative
+        if (relativeTomidpoint) {
+            if (colorVal < midVal) {
+                // Blue for values below midpoint
                 colorStyle = beyondRange ? 'color: rgb(0, 0, 120); font-weight: bold;' : 'color: blue;';
-            } else if (colorVal > 0) {
-                // Red for positive
+            } else if (colorVal > midVal) {
+                // Red for values above midpoint
                 colorStyle = beyondRange ? 'color: rgb(120, 0, 0); font-weight: bold;' : 'color: red;';
             } else {
                 colorStyle = 'color: gray;';
@@ -686,6 +711,8 @@ function updateScatterWithNormalizedColors(chart, yValues, colorValues, xValues,
         let valueDisplay = formattedColorVal;
         if (beyondRange) {
             valueDisplay += ' (beyond range)';
+        } else if (point.nearMidpoint) {
+            valueDisplay += ' (near midpoint)';
         }
         
         return [
@@ -755,7 +782,7 @@ function updateScatterWithNormalizedColors(chart, yValues, colorValues, xValues,
 }
 
 // Function to create Seaborn-style color legend
-function updateSeabornStyleLegend(minVal, maxVal, spanZero) {
+function updateSeabornStyleLegend(minVal, maxVal, spanDivergent, midVal) {
     // Clean up any existing legend
     cleanupColorLegend();
     
@@ -771,10 +798,27 @@ function updateSeabornStyleLegend(minVal, maxVal, spanZero) {
     legendContainer.style.boxShadow = '0 1px 3px rgba(0,0,0,0.2)';
     legendContainer.style.zIndex = '10';
     
-    // Create the gradient based on the data range
-    if (spanZero) {
-        // Diverging palette for data crossing zero
-        legendContainer.style.background = 'linear-gradient(to top, #000080, blue, #9090ff, #e0e0e0, #ff9090, red, #800000)';
+    // Create the gradient based on the data range and midpoint
+    if (spanDivergent) {
+        // Diverging palette with midpoint
+        if (midVal !== 0) {
+            // Calculate the midpoint position as a percentage (0-100)
+            const midPosition = ((midVal - minVal) / (maxVal - minVal)) * 100;
+            
+            // Create custom gradient with midpoint
+            legendContainer.style.background = 
+                `linear-gradient(to top, 
+                #000080 0%, 
+                blue ${midPosition/2}%, 
+                #9090ff ${midPosition - 5}%, 
+                #e0e0e0 ${midPosition}%, 
+                #ff9090 ${midPosition + 5}%, 
+                red ${(100 + midPosition)/2}%, 
+                #800000 100%)`;
+        } else {
+            // Standard zero-centered diverging palette
+            legendContainer.style.background = 'linear-gradient(to top, #000080, blue, #9090ff, #e0e0e0, #ff9090, red, #800000)';
+        }
     } else if (minVal < 0 && maxVal < 0) {
         // All negative values - blue palette (dark to light)
         legendContainer.style.background = 'linear-gradient(to top, #000080, darkblue, blue, #9090ff)';
@@ -804,78 +848,73 @@ function updateSeabornStyleLegend(minVal, maxVal, spanZero) {
     legendContainer.appendChild(minLabel);
     legendContainer.appendChild(maxLabel);
     
-    // Add zero marker if range spans zero
-    if (spanZero) {
+    // Add midpoint marker
+    if (midVal !== 0 || spanDivergent) {
+        // Get the appropriate midpoint value
+        const displayMidVal = midVal !== 0 ? midVal : 0;
+        
+        // Calculate relative position from 0-100%
+        const relativePosition = ((displayMidVal - minVal) / (maxVal - minVal)) * 100;
+        
+        // Cap the position between 0 and 100
+        const midPosition = Math.max(0, Math.min(100, relativePosition));
+        
         const zeroLabel = document.createElement('div');
         zeroLabel.style.position = 'absolute';
-        zeroLabel.style.top = '50%';
+        zeroLabel.style.bottom = `${midPosition}%`;
         zeroLabel.style.right = '35px';
         zeroLabel.style.fontSize = '12px';
-        zeroLabel.style.transform = 'translateY(-50%)';
-        zeroLabel.textContent = '0';
+        zeroLabel.style.transform = 'translateY(50%)';
+        zeroLabel.textContent = displayMidVal.toFixed(1);
         legendContainer.appendChild(zeroLabel);
         
-        // Add divider line at zero
+        // Add divider line at midpoint
         const divider = document.createElement('div');
         divider.style.position = 'absolute';
-        divider.style.top = '50%';
+        divider.style.bottom = `${midPosition}%`;
         divider.style.left = '0';
         divider.style.right = '0';
         divider.style.height = '1px';
         divider.style.backgroundColor = 'rgba(0, 0, 0, 0.3)';
         legendContainer.appendChild(divider);
         
-        // Add near-zero markers to show the transition points
-        const nearZeroThreshold = Math.max(Math.abs(minVal), Math.abs(maxVal)) * 0.1;
-        
-        if (nearZeroThreshold > 0) {
-            // Negative near-zero marker
-            const negNearZeroLabel = document.createElement('div');
-            negNearZeroLabel.style.position = 'absolute';
-            negNearZeroLabel.style.top = '42%';
-            negNearZeroLabel.style.right = '35px';
-            negNearZeroLabel.style.fontSize = '10px';
-            negNearZeroLabel.style.color = '#666';
-            negNearZeroLabel.textContent = (-nearZeroThreshold).toFixed(1);
-            legendContainer.appendChild(negNearZeroLabel);
+        // Add markers for transition points on either side of midpoint if the range is divergent
+        if (spanDivergent) {
+            const transitionThreshold = Math.max(Math.abs(maxVal - minVal)) * 0.05;
             
-            // Positive near-zero marker
-            const posNearZeroLabel = document.createElement('div');
-            posNearZeroLabel.style.position = 'absolute';
-            posNearZeroLabel.style.top = '58%';
-            posNearZeroLabel.style.right = '35px';
-            posNearZeroLabel.style.fontSize = '10px';
-            posNearZeroLabel.style.color = '#666';
-            posNearZeroLabel.textContent = nearZeroThreshold.toFixed(1);
-            legendContainer.appendChild(posNearZeroLabel);
+            // Below midpoint marker
+            const belowMidLabel = document.createElement('div');
+            belowMidLabel.style.position = 'absolute';
+            belowMidLabel.style.bottom = `${Math.max(0, midPosition - 8)}%`;
+            belowMidLabel.style.right = '35px';
+            belowMidLabel.style.fontSize = '10px';
+            belowMidLabel.style.color = '#666';
+            belowMidLabel.textContent = (displayMidVal - transitionThreshold).toFixed(1);
+            legendContainer.appendChild(belowMidLabel);
+            
+            // Above midpoint marker
+            const aboveMidLabel = document.createElement('div');
+            aboveMidLabel.style.position = 'absolute';
+            aboveMidLabel.style.bottom = `${Math.min(100, midPosition + 8)}%`;
+            aboveMidLabel.style.right = '35px';
+            aboveMidLabel.style.fontSize = '10px';
+            aboveMidLabel.style.color = '#666';
+            aboveMidLabel.textContent = (displayMidVal + transitionThreshold).toFixed(1);
+            legendContainer.appendChild(aboveMidLabel);
         }
     }
     
     // Add colorMin and colorMax markers if explicitly set
     if (colorMinValue !== null || colorMaxValue !== null) {
-        const legendHeight = 200; // Height of the color gradient
-        
         if (colorMinValue !== null && colorMinValue > minVal) {
             // Calculate position based on value's place in the range
-            let position;
-            if (spanZero) {
-                // For diverging scale, position depends on which side of zero we're on
-                if (colorMinValue < 0) {
-                    // Negative side - should be between bottom and middle
-                    position = 50 - (50 * colorMinValue / minVal);
-                } else {
-                    // Positive side - should be between middle and top
-                    position = 50 + (50 * colorMinValue / maxVal);
-                }
-            } else {
-                // Linear scale
-                position = 100 * (colorMinValue - minVal) / (maxVal - minVal);
-            }
+            const position = ((colorMinValue - minVal) / (maxVal - minVal)) * 100;
+            const boundedPosition = Math.max(0, Math.min(100, position));
             
             // Create marker
             const minMarker = document.createElement('div');
             minMarker.style.position = 'absolute';
-            minMarker.style.bottom = `${position}%`;
+            minMarker.style.bottom = `${boundedPosition}%`;
             minMarker.style.left = '-5px';
             minMarker.style.width = '40px';
             minMarker.style.height = '1px';
@@ -884,7 +923,7 @@ function updateSeabornStyleLegend(minVal, maxVal, spanZero) {
             const minMarkerLabel = document.createElement('div');
             minMarkerLabel.style.position = 'absolute';
             minMarkerLabel.style.right = '45px';
-            minMarkerLabel.style.bottom = `${position}%`;
+            minMarkerLabel.style.bottom = `${boundedPosition}%`;
             minMarkerLabel.style.fontSize = '10px';
             minMarkerLabel.style.transform = 'translateY(50%)';
             minMarkerLabel.textContent = `Min: ${colorMinValue}`;
@@ -896,25 +935,13 @@ function updateSeabornStyleLegend(minVal, maxVal, spanZero) {
         
         if (colorMaxValue !== null && colorMaxValue < maxVal) {
             // Calculate position
-            let position;
-            if (spanZero) {
-                // For diverging scale, position depends on which side of zero we're on
-                if (colorMaxValue < 0) {
-                    // Negative side - should be between bottom and middle
-                    position = 50 - (50 * colorMaxValue / minVal);
-                } else {
-                    // Positive side - should be between middle and top
-                    position = 50 + (50 * colorMaxValue / maxVal);
-                }
-            } else {
-                // Linear scale
-                position = 100 * (colorMaxValue - minVal) / (maxVal - minVal);
-            }
+            const position = ((colorMaxValue - minVal) / (maxVal - minVal)) * 100;
+            const boundedPosition = Math.max(0, Math.min(100, position));
             
             // Create marker
             const maxMarker = document.createElement('div');
             maxMarker.style.position = 'absolute';
-            maxMarker.style.bottom = `${position}%`;
+            maxMarker.style.bottom = `${boundedPosition}%`;
             maxMarker.style.left = '-5px';
             maxMarker.style.width = '40px';
             maxMarker.style.height = '1px';
@@ -923,7 +950,7 @@ function updateSeabornStyleLegend(minVal, maxVal, spanZero) {
             const maxMarkerLabel = document.createElement('div');
             maxMarkerLabel.style.position = 'absolute';
             maxMarkerLabel.style.right = '45px';
-            maxMarkerLabel.style.bottom = `${position}%`;
+            maxMarkerLabel.style.bottom = `${boundedPosition}%`;
             maxMarkerLabel.style.fontSize = '10px';
             maxMarkerLabel.style.transform = 'translateY(50%)';
             maxMarkerLabel.textContent = `Max: ${colorMaxValue}`;
@@ -932,6 +959,29 @@ function updateSeabornStyleLegend(minVal, maxVal, spanZero) {
             legendContainer.appendChild(maxMarker);
             legendContainer.appendChild(maxMarkerLabel);
         }
+    }
+    
+    // Add midpoint marker if explicitly set
+    if (colorMidpoint !== 0) {
+        const midpointMarker = document.createElement('div');
+        midpointMarker.style.position = 'absolute';
+        midpointMarker.style.top = `${50 - 50 * colorMidpoint / maxVal}%`;
+        midpointMarker.style.left = '-5px';
+        midpointMarker.style.width = '40px';
+        midpointMarker.style.height = '1px';
+        midpointMarker.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
+        
+        const midpointMarkerLabel = document.createElement('div');
+        midpointMarkerLabel.style.position = 'absolute';
+        midpointMarkerLabel.style.right = '45px';
+        midpointMarkerLabel.style.bottom = `${50 - 50 * colorMidpoint / maxVal}%`;
+        midpointMarkerLabel.style.fontSize = '10px';
+        midpointMarkerLabel.style.transform = 'translateY(50%)';
+        midpointMarkerLabel.textContent = `Midpoint: ${colorMidpoint}`;
+        midpointMarkerLabel.style.fontWeight = 'bold';
+        
+        legendContainer.appendChild(midpointMarker);
+        legendContainer.appendChild(midpointMarkerLabel);
     }
     
     // Add to the container
@@ -1356,6 +1406,33 @@ function updateColorOptions() {
 // Function to toggle normalize range inputs
 function toggleNormalizeRange() {
     normalizeRange.style.display = colorNormalizeCheckbox.checked ? 'block' : 'none';
+    
+    // Create midpoint input if it doesn't exist
+    if (colorNormalizeCheckbox.checked && !document.getElementById('midpoint-value')) {
+        const midpointGroup = document.createElement('div');
+        midpointGroup.className = 'form-group';
+        midpointGroup.style.marginTop = '10px';
+        
+        const midpointLabel = document.createElement('label');
+        midpointLabel.htmlFor = 'midpoint-value';
+        midpointLabel.textContent = 'Midpoint:';
+        midpointLabel.title = 'Value at which colors transition (0 = automatic)';
+        
+        const midpointInput = document.createElement('input');
+        midpointInput.type = 'number';
+        midpointInput.id = 'midpoint-value';
+        midpointInput.step = 'any';
+        midpointInput.placeholder = '0';
+        midpointInput.className = 'form-control';
+        midpointInput.style.display = 'inline-block';
+        midpointInput.style.width = '80px';
+        
+        midpointGroup.appendChild(midpointLabel);
+        midpointGroup.appendChild(document.createTextNode(' '));
+        midpointGroup.appendChild(midpointInput);
+        
+        normalizeRange.appendChild(midpointGroup);
+    }
 }
 
 // Function to display error message to the user
@@ -1417,6 +1494,10 @@ function generateGraph() {
         colorMinValue = minValueInput.value ? parseFloat(minValueInput.value) : null;
         colorMaxValue = maxValueInput.value ? parseFloat(maxValueInput.value) : null;
         
+        // Get midpoint value
+        const midpointInput = document.getElementById('midpoint-value');
+        colorMidpoint = midpointInput && midpointInput.value ? parseFloat(midpointInput.value) : 0;
+        
         // Clean up any existing color legend
         cleanupColorLegend();
         
@@ -1424,7 +1505,7 @@ function generateGraph() {
         document.querySelectorAll('.error-message').forEach(el => el.remove());
         
         console.log("Selected axes:", xAxis, yAxis, "Color by:", colorAxis, 
-                   "Normalize:", normalizeColors, "Range:", colorMinValue, colorMaxValue);
+                   "Normalize:", normalizeColors, "Range:", colorMinValue, colorMaxValue, "Midpoint:", colorMidpoint);
         console.log("Display settings:", MAX_DISPLAY_POINTS, "points, step size", NAVIGATION_STEP_SIZE);
         
         // Reset data view position
