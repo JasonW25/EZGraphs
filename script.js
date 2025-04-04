@@ -2,7 +2,8 @@
 let csvData = null;
 let headers = [];
 let chartInstance = null;
-const MAX_DISPLAY_POINTS = 50; // Default max points to display at once without scrolling
+let MAX_DISPLAY_POINTS = 50; // Default max points to display at once without scrolling
+let NAVIGATION_STEP_SIZE = 10; // Default step size for navigation
 let currentDataStart = 0; // Starting index for data display window
 let fullDataset = { labels: [], data: [], colorData: [], xValues: [] }; // Store complete dataset for scrolling
 let isFullscreen = false; // Track fullscreen state
@@ -41,6 +42,208 @@ colorNormalizeCheckbox.addEventListener('change', toggleNormalizeRange);
 scrollLeftBtn.addEventListener('click', scrollLeft);
 scrollRightBtn.addEventListener('click', scrollRight);
 fullscreenToggle.addEventListener('click', toggleFullscreen);
+
+// Add event listeners for display settings inputs
+document.addEventListener('DOMContentLoaded', function() {
+    // Check if the display settings inputs exist
+    const displayPointsInput = document.getElementById('display-points');
+    const stepSizeInput = document.getElementById('step-size');
+    
+    if (displayPointsInput && stepSizeInput) {
+        // Set default values
+        displayPointsInput.value = MAX_DISPLAY_POINTS;
+        stepSizeInput.value = NAVIGATION_STEP_SIZE;
+        
+        // Add event listeners for input changes
+        displayPointsInput.addEventListener('change', updateDisplaySettings);
+        stepSizeInput.addEventListener('change', updateDisplaySettings);
+    } else {
+        console.log("Display settings inputs not found, will create them");
+        createDisplaySettingsInputs();
+    }
+});
+
+// Function to create display settings inputs if they don't exist
+function createDisplaySettingsInputs() {
+    // Create container for display settings
+    const settingsContainer = document.createElement('div');
+    settingsContainer.className = 'display-settings';
+    settingsContainer.style.marginBottom = '15px';
+    settingsContainer.style.display = 'flex';
+    settingsContainer.style.alignItems = 'center';
+    settingsContainer.style.gap = '15px';
+    settingsContainer.style.flexWrap = 'wrap';
+    
+    // Create input for display points
+    const pointsContainer = document.createElement('div');
+    pointsContainer.className = 'settings-group';
+    
+    const pointsLabel = document.createElement('label');
+    pointsLabel.htmlFor = 'display-points';
+    pointsLabel.textContent = 'Points to Display:';
+    pointsLabel.style.marginRight = '5px';
+    
+    const pointsInput = document.createElement('input');
+    pointsInput.type = 'number';
+    pointsInput.id = 'display-points';
+    pointsInput.min = '10';
+    pointsInput.max = '1000';
+    pointsInput.value = MAX_DISPLAY_POINTS;
+    pointsInput.style.width = '70px';
+    
+    pointsContainer.appendChild(pointsLabel);
+    pointsContainer.appendChild(pointsInput);
+    
+    // Create input for step size
+    const stepContainer = document.createElement('div');
+    stepContainer.className = 'settings-group';
+    
+    const stepLabel = document.createElement('label');
+    stepLabel.htmlFor = 'step-size';
+    stepLabel.textContent = 'Navigation Step Size:';
+    stepLabel.style.marginRight = '5px';
+    
+    const stepInput = document.createElement('input');
+    stepInput.type = 'number';
+    stepInput.id = 'step-size';
+    stepInput.min = '1';
+    stepInput.max = '500';
+    stepInput.value = NAVIGATION_STEP_SIZE;
+    stepInput.style.width = '70px';
+    
+    stepContainer.appendChild(stepLabel);
+    stepContainer.appendChild(stepInput);
+    
+    // Create apply button
+    const applyButton = document.createElement('button');
+    applyButton.textContent = 'Apply Settings';
+    applyButton.className = 'btn';
+    applyButton.style.marginLeft = '10px';
+    applyButton.addEventListener('click', updateDisplaySettings);
+    
+    // Add all elements to the container
+    settingsContainer.appendChild(pointsContainer);
+    settingsContainer.appendChild(stepContainer);
+    settingsContainer.appendChild(applyButton);
+    
+    // Find where to insert the settings
+    const controlsContainer = document.querySelector('.controls-container') || 
+                             document.querySelector('.graph-controls');
+    
+    if (controlsContainer) {
+        // Insert settings at the end of controls
+        controlsContainer.appendChild(settingsContainer);
+        
+        // Add event listeners
+        pointsInput.addEventListener('change', updateDisplaySettings);
+        stepInput.addEventListener('change', updateDisplaySettings);
+    } else {
+        // If controls container not found, insert before graph container
+        const graphParent = graphContainer.parentNode;
+        graphParent.insertBefore(settingsContainer, graphContainer);
+    }
+    
+    // Add refresh button to data controls if they exist
+    const dataControlsElement = document.querySelector('.data-controls');
+    if (dataControlsElement) {
+        enhanceDataControls(dataControlsElement);
+    }
+}
+
+// Function to enhance data controls with additional functionality
+function enhanceDataControls(dataControls) {
+    // Update existing buttons to show step size
+    if (scrollLeftBtn) {
+        scrollLeftBtn.textContent = `← Previous (${NAVIGATION_STEP_SIZE})`;
+        scrollLeftBtn.title = `Move back ${NAVIGATION_STEP_SIZE} data points`;
+    }
+    
+    if (scrollRightBtn) {
+        scrollRightBtn.textContent = `Next (${NAVIGATION_STEP_SIZE}) →`;
+        scrollRightBtn.title = `Move forward ${NAVIGATION_STEP_SIZE} data points`;
+    }
+    
+    // Add refresh button if it doesn't exist
+    if (!document.getElementById('refresh-data')) {
+        const refreshBtn = document.createElement('button');
+        refreshBtn.id = 'refresh-data';
+        refreshBtn.className = 'btn';
+        refreshBtn.textContent = '↻ Refresh View';
+        refreshBtn.title = 'Refresh the current data view';
+        refreshBtn.style.marginLeft = '10px';
+        
+        refreshBtn.addEventListener('click', function() {
+            if (chartInstance) {
+                updateDisplaySettings();
+            }
+        });
+        
+        // Insert after position span
+        if (dataPositionSpan && dataPositionSpan.parentNode) {
+            dataPositionSpan.parentNode.insertBefore(refreshBtn, dataPositionSpan.nextSibling);
+        } else {
+            dataControls.appendChild(refreshBtn);
+        }
+    }
+}
+
+// Function to update display points and navigation step size
+function updateDisplaySettings() {
+    // Get values from inputs
+    const displayPointsInput = document.getElementById('display-points');
+    const stepSizeInput = document.getElementById('step-size');
+    
+    if (!displayPointsInput || !stepSizeInput) {
+        console.error("Display settings inputs not found");
+        return;
+    }
+    
+    const displayPoints = parseInt(displayPointsInput.value);
+    const stepSize = parseInt(stepSizeInput.value);
+    
+    // Validate inputs and apply constraints
+    if (!isNaN(displayPoints) && displayPoints > 0) {
+        // Ensure reasonable limits
+        MAX_DISPLAY_POINTS = Math.min(Math.max(displayPoints, 10), 1000);
+        displayPointsInput.value = MAX_DISPLAY_POINTS; // Update input to reflect constrained value
+    }
+    
+    if (!isNaN(stepSize) && stepSize > 0) {
+        // Ensure reasonable limits
+        NAVIGATION_STEP_SIZE = Math.min(Math.max(stepSize, 1), 500);
+        stepSizeInput.value = NAVIGATION_STEP_SIZE; // Update input to reflect constrained value
+        
+        // Update button text to reflect new step size
+        if (scrollLeftBtn) {
+            scrollLeftBtn.textContent = `← Previous (${NAVIGATION_STEP_SIZE})`;
+            scrollLeftBtn.title = `Move back ${NAVIGATION_STEP_SIZE} data points`;
+        }
+        
+        if (scrollRightBtn) {
+            scrollRightBtn.textContent = `Next (${NAVIGATION_STEP_SIZE}) →`;
+            scrollRightBtn.title = `Move forward ${NAVIGATION_STEP_SIZE} data points`;
+        }
+    }
+    
+    // If chart exists, update the data window
+    if (chartInstance && fullDataset.labels.length > 0) {
+        // Reset current position to avoid being out of bounds
+        const maxStart = Math.max(0, fullDataset.labels.length - MAX_DISPLAY_POINTS);
+        currentDataStart = Math.min(currentDataStart, maxStart);
+        
+        // Update the chart
+        updateChartDataWindow();
+        
+        // Update display settings message in the chart title
+        if (chartInstance.options.plugins.title.originalText) {
+            chartInstance.options.plugins.title.text = 
+                `${chartInstance.options.plugins.title.originalText} (Showing ${MAX_DISPLAY_POINTS} points)`;
+            chartInstance.update();
+        }
+    }
+    
+    console.log(`Display settings updated: ${MAX_DISPLAY_POINTS} points, step size ${NAVIGATION_STEP_SIZE}`);
+}
 
 // Add keyboard listener for fullscreen escape
 document.addEventListener('keydown', (e) => {
@@ -86,9 +289,8 @@ function toggleFullscreen() {
 function scrollLeft() {
     if (!fullDataset.labels.length || !chartInstance) return;
     
-    // Move by 25% of the visible window
-    const moveAmount = Math.max(5, Math.floor(MAX_DISPLAY_POINTS * 0.25));
-    currentDataStart = Math.max(0, currentDataStart - moveAmount);
+    // Use configured navigation step size
+    currentDataStart = Math.max(0, currentDataStart - NAVIGATION_STEP_SIZE);
     updateChartDataWindow();
 }
 
@@ -96,10 +298,9 @@ function scrollLeft() {
 function scrollRight() {
     if (!fullDataset.labels.length || !chartInstance) return;
     
-    // Move by 25% of the visible window
-    const moveAmount = Math.max(5, Math.floor(MAX_DISPLAY_POINTS * 0.25));
+    // Use configured navigation step size
     const maxStart = Math.max(0, fullDataset.labels.length - MAX_DISPLAY_POINTS);
-    currentDataStart = Math.min(maxStart, currentDataStart + moveAmount);
+    currentDataStart = Math.min(maxStart, currentDataStart + NAVIGATION_STEP_SIZE);
     updateChartDataWindow();
 }
 
@@ -113,17 +314,17 @@ function handleGraphScroll(event) {
     const scrollDirection = Math.sign(event.deltaY);
     const dataLength = fullDataset.labels.length;
     
-    // Adjust scroll speed based on data size
-    const scrollSpeed = Math.max(1, Math.floor(dataLength / 500));
+    // Use smaller steps for mouse wheel scrolling
+    const wheelScrollSpeed = Math.max(1, Math.floor(NAVIGATION_STEP_SIZE / 2));
     
     if (scrollDirection > 0) {
         // Scroll right/forward
         if (currentDataStart + MAX_DISPLAY_POINTS < dataLength) {
-            currentDataStart += scrollSpeed; // Adjusted speed
+            currentDataStart += wheelScrollSpeed;
         }
     } else {
         // Scroll left/backward
-        currentDataStart = Math.max(0, currentDataStart - scrollSpeed);
+        currentDataStart = Math.max(0, currentDataStart - wheelScrollSpeed);
     }
     
     // Update the visible data window
@@ -274,44 +475,160 @@ function updateScatterWithNormalizedColors(chart, yValues, colorValues, xValues,
         maxVal = maxVal + 1;
     }
     
+    // Determine if the range spans across zero (for diverging palette)
+    const spanZero = minVal < 0 && maxVal > 0;
+    
+    // Debug info
+    let negCount = 0;
+    let posCount = 0;
+    let zeroCount = 0;
+    
     // Create a new dataset with individual point colors
     for (let i = 0; i < yValues.length; i++) {
         const yVal = yValues[i];
         const colorVal = colorValues[i] !== undefined ? colorValues[i] : 0;
         const xVal = xValues && xValues.length > i ? xValues[i] : i;
-        const label = labels && labels.length > i ? labels[i] : '';
+        const label = labels && i < labels.length ? labels[i] : '';
+        
+        // Count values for debugging
+        if (colorVal < 0) negCount++;
+        else if (colorVal > 0) posCount++;
+        else zeroCount++;
         
         // Normalize the color value between min and max
-        let normalizedVal = (colorVal - minVal) / (maxVal - minVal);
+        let normalizedVal;
         
-        // Clamp normalized value between 0 and 1
-        normalizedVal = Math.max(0, Math.min(1, normalizedVal));
+        if (spanZero) {
+            // For ranges that cross zero, use diverging palette
+            if (colorVal < 0) {
+                // Negative values should be normalized within their own range
+                normalizedVal = colorVal / Math.min(-0.00001, minVal);
+                // Ensure the values are in -1 to 0 range, with -1 being the most negative
+                normalizedVal = Math.max(-1, Math.min(0, normalizedVal));
+            } else {
+                // Positive values should be normalized within their own range
+                normalizedVal = colorVal / Math.max(0.00001, maxVal);
+                // Ensure the values are in 0 to 1 range, with 1 being the most positive
+                normalizedVal = Math.max(0, Math.min(1, normalizedVal));
+            }
+        } else {
+            // For ranges that don't cross zero, use sequential palette
+            normalizedVal = (colorVal - minVal) / (maxVal - minVal);
+            normalizedVal = Math.max(0, Math.min(1, normalizedVal));
+        }
         
         let pointColor;
         
-        // Determine if the value is negative, zero-ish, or positive in the original scale
-        if (colorVal < 0) {
-            // Blue for negative (darker blue for more negative)
-            const intensity = 1 - (normalizedVal * 0.5); // Keep blue reasonably visible
-            pointColor = `rgba(0, 0, 255, ${intensity})`;
-        } else if (colorVal > 0) {
-            // Red for positive (darker red for more positive)
-            const intensity = 0.5 + (normalizedVal * 0.5); // Scale from 0.5 to 1 for visibility
-            pointColor = `rgba(255, 0, 0, ${intensity})`;
+        // Check if value exceeds normalization range
+        const beyondRange = (colorMinValue !== null && colorVal < colorMinValue) || 
+                           (colorMaxValue !== null && colorVal > colorMaxValue);
+        
+        // Add a flag to track values near zero for special coloring
+        const nearZero = Math.abs(colorVal) < Math.max(Math.abs(minVal), Math.abs(maxVal)) * 0.1;
+        
+        if (spanZero) {
+            // Create a diverging palette (blue → gray → red)
+            if (colorVal < 0) {
+                if (nearZero) {
+                    // Values close to zero get a very light blue with gray tint
+                    const intensity = Math.abs(normalizedVal) * 0.5; // Reduced intensity for near-zero
+                    pointColor = `rgba(200, 200, 230, ${0.7 + intensity * 0.3})`; // Light blue-gray
+                } else if (beyondRange) {
+                    // Values beyond normalization range get darker, more saturated blue
+                    pointColor = `rgba(0, 0, 100, 0.9)`; // Dark blue
+                } else {
+                    // Normal negative values - blue with intensity based on value
+                    const intensity = Math.abs(normalizedVal);
+                    // Use a formula that creates stronger blue for values farther from zero
+                    const blueIntensity = 150 + Math.round(105 * intensity);
+                    pointColor = `rgba(0, 0, ${blueIntensity}, ${0.6 + intensity * 0.4})`; 
+                }
+            } else if (colorVal > 0) {
+                if (nearZero) {
+                    // Values close to zero get a very light red with gray tint
+                    const intensity = normalizedVal * 0.5; // Reduced intensity for near-zero
+                    pointColor = `rgba(230, 200, 200, ${0.7 + intensity * 0.3})`; // Light red-gray
+                } else if (beyondRange) {
+                    // Values beyond normalization range get darker, more saturated red
+                    pointColor = `rgba(100, 0, 0, 0.9)`; // Dark red
+                } else {
+                    // Normal positive values - red with intensity based on value
+                    const intensity = normalizedVal;
+                    // Use a formula that creates stronger red for values farther from zero
+                    const redIntensity = 150 + Math.round(105 * intensity);
+                    pointColor = `rgba(${redIntensity}, 0, 0, ${0.6 + intensity * 0.4})`;
+                }
+            } else {
+                // Neutral gray for zero
+                pointColor = 'rgba(200, 200, 200, 0.8)';
+            }
+        } else if (minVal < 0 && maxVal < 0) {
+            // All negative values - blue palette
+            if (beyondRange) {
+                // Values beyond range get darker blue
+                pointColor = `rgba(0, 0, 100, 0.9)`;
+            } else {
+                // For all-negative data, intensity increases with absolute value
+                const intensity = 1 - normalizedVal; // invert so 0 = lightest, 1 = darkest
+                pointColor = `rgba(0, 0, ${Math.round(150 + 105 * intensity)}, ${0.6 + intensity * 0.4})`;
+            }
+        } else if (minVal >= 0 && maxVal > 0) {
+            // All positive values - red palette
+            if (beyondRange) {
+                // Values beyond range get darker red
+                pointColor = `rgba(100, 0, 0, 0.9)`;
+            } else {
+                // For all-positive data, intensity increases with value
+                const intensity = normalizedVal;
+                pointColor = `rgba(${Math.round(150 + 105 * intensity)}, 0, 0, ${0.6 + intensity * 0.4})`;
+            }
         } else {
-            // Neutral color for zero
-            pointColor = 'rgba(150, 150, 150, 0.7)';
+            // Use viridis-like palette (continuous from cool to warm)
+            // This creates a smooth color gradient like in Seaborn
+            const h = (1 - normalizedVal) * 240; // Hue: 240 (blue) to 0 (red)
+            const s = 0.8; // Saturation: 80%
+            const l = 0.5; // Lightness: 50%
+            
+            // Convert HSL to RGB (simplified conversion)
+            const c = (1 - Math.abs(2 * l - 1)) * s;
+            const x = c * (1 - Math.abs((h / 60) % 2 - 1));
+            const m = l - c/2;
+            
+            let r, g, b;
+            if (h < 60) {
+                [r, g, b] = [c, x, 0];
+            } else if (h < 120) {
+                [r, g, b] = [x, c, 0];
+            } else if (h < 180) {
+                [r, g, b] = [0, c, x];
+            } else if (h < 240) {
+                [r, g, b] = [0, x, c];
+            } else if (h < 300) {
+                [r, g, b] = [x, 0, c];
+            } else {
+                [r, g, b] = [c, 0, x];
+            }
+            
+            pointColor = `rgba(${Math.round((r + m) * 255)}, ${Math.round((g + m) * 255)}, ${Math.round((b + m) * 255)}, 0.8)`;
         }
         
         // Add to our data arrays
         scatterData.push({
             x: xVal,
             y: yVal,
-            originalLabel: label
+            originalLabel: label,
+            colorValue: colorVal,
+            normalizedValue: normalizedVal,
+            beyondRange: beyondRange,
+            nearZero: nearZero
         });
         
         pointColors.push(pointColor);
     }
+    
+    // Debug info
+    console.log(`Color distribution: ${negCount} negative, ${posCount} positive, ${zeroCount} zero`);
+    console.log("Sample colors generated:", pointColors.slice(0, 5));
     
     // Update the chart's dataset
     if (chart.data.datasets.length > 0) {
@@ -321,35 +638,67 @@ function updateScatterWithNormalizedColors(chart, yValues, colorValues, xValues,
         // Set point colors individually - important for Chart.js to render correctly
         chart.data.datasets[0].backgroundColor = pointColors;
         chart.data.datasets[0].borderColor = pointColors;
+        
+        // Increase point size for better visibility
+        chart.data.datasets[0].pointRadius = graphTypeSelect.value === 'bubble' ? 6 : 4;
+        chart.data.datasets[0].pointHoverRadius = graphTypeSelect.value === 'bubble' ? 8 : 6;
     }
     
-    // Update or create the color legend
-    updateColorLegend(minVal, maxVal);
+    // Update or create the color legend to match the updated color scheme
+    updateSeabornStyleLegend(minVal, maxVal, spanZero);
     
     // Update tooltip callbacks to show color-coded values
     chart.options.plugins.tooltip.callbacks.label = function(context) {
         const point = context.raw;
-        const colorVal = colorValues[context.dataIndex];
+        const colorVal = point.colorValue;
+        const beyondRange = point.beyondRange;
         const formattedColorVal = colorVal !== undefined ? colorVal.toFixed(2) : 'N/A';
         
         let colorStyle = '';
-        if (colorVal < 0) {
-            colorStyle = 'color: blue;';
-        } else if (colorVal > 0) {
-            colorStyle = 'color: red;';
+        
+        // Style text in tooltip to match point color (simplified for better readability)
+        if (spanZero) {
+            if (colorVal < 0) {
+                // Blue for negative
+                colorStyle = beyondRange ? 'color: rgb(0, 0, 120); font-weight: bold;' : 'color: blue;';
+            } else if (colorVal > 0) {
+                // Red for positive
+                colorStyle = beyondRange ? 'color: rgb(120, 0, 0); font-weight: bold;' : 'color: red;';
+            } else {
+                colorStyle = 'color: gray;';
+            }
+        } else if (minVal < 0 && maxVal < 0) {
+            // All negative - show blue text
+            colorStyle = beyondRange ? 'color: rgb(0, 0, 120); font-weight: bold;' : 'color: blue;';
+        } else if (minVal >= 0 && maxVal > 0) {
+            // All positive - show red text
+            colorStyle = beyondRange ? 'color: rgb(120, 0, 0); font-weight: bold;' : 'color: red;';
+        } else {
+            // Default colors
+            if (colorVal < 0) {
+                colorStyle = 'color: blue;';
+            } else if (colorVal > 0) {
+                colorStyle = 'color: red;';
+            }
+        }
+        
+        // Format tooltip with range information
+        let valueDisplay = formattedColorVal;
+        if (beyondRange) {
+            valueDisplay += ' (beyond range)';
         }
         
         return [
             `X: ${point.originalLabel || point.x}`,
             `Y: ${point.y}`,
-            `<span style="${colorStyle}">Value: ${formattedColorVal}</span>`
+            `<span style="${colorStyle}">Value: ${valueDisplay}</span>`
         ];
     };
     
-    // Make sure tooltips use HTML
+    // Make sure tooltips use HTML (same as before)
     chart.options.plugins.tooltip.enabled = false;
     chart.options.plugins.tooltip.external = function(context) {
-        // External tooltip implementation
+        // External tooltip implementation (unchanged)
         let tooltipEl = document.getElementById('chartjs-tooltip');
         
         // Create the tooltip element if it doesn't exist
@@ -405,6 +754,190 @@ function updateScatterWithNormalizedColors(chart, yValues, colorValues, xValues,
     };
 }
 
+// Function to create Seaborn-style color legend
+function updateSeabornStyleLegend(minVal, maxVal, spanZero) {
+    // Clean up any existing legend
+    cleanupColorLegend();
+    
+    // Create new legend container
+    const legendContainer = document.createElement('div');
+    legendContainer.className = 'color-gradient-legend';
+    legendContainer.style.position = 'absolute';
+    legendContainer.style.right = '10px';
+    legendContainer.style.top = '50px';
+    legendContainer.style.width = '30px';
+    legendContainer.style.height = '200px';
+    legendContainer.style.borderRadius = '4px';
+    legendContainer.style.boxShadow = '0 1px 3px rgba(0,0,0,0.2)';
+    legendContainer.style.zIndex = '10';
+    
+    // Create the gradient based on the data range
+    if (spanZero) {
+        // Diverging palette for data crossing zero
+        legendContainer.style.background = 'linear-gradient(to top, #000080, blue, #9090ff, #e0e0e0, #ff9090, red, #800000)';
+    } else if (minVal < 0 && maxVal < 0) {
+        // All negative values - blue palette (dark to light)
+        legendContainer.style.background = 'linear-gradient(to top, #000080, darkblue, blue, #9090ff)';
+    } else if (minVal >= 0 && maxVal > 0) {
+        // All positive values - red palette (light to dark)
+        legendContainer.style.background = 'linear-gradient(to top, #ff9090, red, darkred, #800000)';
+    } else {
+        // Viridis-like palette for mixed data not crossing zero
+        legendContainer.style.background = 'linear-gradient(to top, #000080, blue, cyan, green, yellow, red, #800000)';
+    }
+    
+    // Add scale values
+    const minLabel = document.createElement('div');
+    minLabel.style.position = 'absolute';
+    minLabel.style.bottom = '0';
+    minLabel.style.right = '35px';
+    minLabel.style.fontSize = '12px';
+    minLabel.textContent = minVal.toFixed(1);
+    
+    const maxLabel = document.createElement('div');
+    maxLabel.style.position = 'absolute';
+    maxLabel.style.top = '0';
+    maxLabel.style.right = '35px';
+    maxLabel.style.fontSize = '12px';
+    maxLabel.textContent = maxVal.toFixed(1);
+    
+    legendContainer.appendChild(minLabel);
+    legendContainer.appendChild(maxLabel);
+    
+    // Add zero marker if range spans zero
+    if (spanZero) {
+        const zeroLabel = document.createElement('div');
+        zeroLabel.style.position = 'absolute';
+        zeroLabel.style.top = '50%';
+        zeroLabel.style.right = '35px';
+        zeroLabel.style.fontSize = '12px';
+        zeroLabel.style.transform = 'translateY(-50%)';
+        zeroLabel.textContent = '0';
+        legendContainer.appendChild(zeroLabel);
+        
+        // Add divider line at zero
+        const divider = document.createElement('div');
+        divider.style.position = 'absolute';
+        divider.style.top = '50%';
+        divider.style.left = '0';
+        divider.style.right = '0';
+        divider.style.height = '1px';
+        divider.style.backgroundColor = 'rgba(0, 0, 0, 0.3)';
+        legendContainer.appendChild(divider);
+        
+        // Add near-zero markers to show the transition points
+        const nearZeroThreshold = Math.max(Math.abs(minVal), Math.abs(maxVal)) * 0.1;
+        
+        if (nearZeroThreshold > 0) {
+            // Negative near-zero marker
+            const negNearZeroLabel = document.createElement('div');
+            negNearZeroLabel.style.position = 'absolute';
+            negNearZeroLabel.style.top = '42%';
+            negNearZeroLabel.style.right = '35px';
+            negNearZeroLabel.style.fontSize = '10px';
+            negNearZeroLabel.style.color = '#666';
+            negNearZeroLabel.textContent = (-nearZeroThreshold).toFixed(1);
+            legendContainer.appendChild(negNearZeroLabel);
+            
+            // Positive near-zero marker
+            const posNearZeroLabel = document.createElement('div');
+            posNearZeroLabel.style.position = 'absolute';
+            posNearZeroLabel.style.top = '58%';
+            posNearZeroLabel.style.right = '35px';
+            posNearZeroLabel.style.fontSize = '10px';
+            posNearZeroLabel.style.color = '#666';
+            posNearZeroLabel.textContent = nearZeroThreshold.toFixed(1);
+            legendContainer.appendChild(posNearZeroLabel);
+        }
+    }
+    
+    // Add colorMin and colorMax markers if explicitly set
+    if (colorMinValue !== null || colorMaxValue !== null) {
+        const legendHeight = 200; // Height of the color gradient
+        
+        if (colorMinValue !== null && colorMinValue > minVal) {
+            // Calculate position based on value's place in the range
+            let position;
+            if (spanZero) {
+                // For diverging scale, position depends on which side of zero we're on
+                if (colorMinValue < 0) {
+                    // Negative side - should be between bottom and middle
+                    position = 50 - (50 * colorMinValue / minVal);
+                } else {
+                    // Positive side - should be between middle and top
+                    position = 50 + (50 * colorMinValue / maxVal);
+                }
+            } else {
+                // Linear scale
+                position = 100 * (colorMinValue - minVal) / (maxVal - minVal);
+            }
+            
+            // Create marker
+            const minMarker = document.createElement('div');
+            minMarker.style.position = 'absolute';
+            minMarker.style.bottom = `${position}%`;
+            minMarker.style.left = '-5px';
+            minMarker.style.width = '40px';
+            minMarker.style.height = '1px';
+            minMarker.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
+            
+            const minMarkerLabel = document.createElement('div');
+            minMarkerLabel.style.position = 'absolute';
+            minMarkerLabel.style.right = '45px';
+            minMarkerLabel.style.bottom = `${position}%`;
+            minMarkerLabel.style.fontSize = '10px';
+            minMarkerLabel.style.transform = 'translateY(50%)';
+            minMarkerLabel.textContent = `Min: ${colorMinValue}`;
+            minMarkerLabel.style.fontWeight = 'bold';
+            
+            legendContainer.appendChild(minMarker);
+            legendContainer.appendChild(minMarkerLabel);
+        }
+        
+        if (colorMaxValue !== null && colorMaxValue < maxVal) {
+            // Calculate position
+            let position;
+            if (spanZero) {
+                // For diverging scale, position depends on which side of zero we're on
+                if (colorMaxValue < 0) {
+                    // Negative side - should be between bottom and middle
+                    position = 50 - (50 * colorMaxValue / minVal);
+                } else {
+                    // Positive side - should be between middle and top
+                    position = 50 + (50 * colorMaxValue / maxVal);
+                }
+            } else {
+                // Linear scale
+                position = 100 * (colorMaxValue - minVal) / (maxVal - minVal);
+            }
+            
+            // Create marker
+            const maxMarker = document.createElement('div');
+            maxMarker.style.position = 'absolute';
+            maxMarker.style.bottom = `${position}%`;
+            maxMarker.style.left = '-5px';
+            maxMarker.style.width = '40px';
+            maxMarker.style.height = '1px';
+            maxMarker.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
+            
+            const maxMarkerLabel = document.createElement('div');
+            maxMarkerLabel.style.position = 'absolute';
+            maxMarkerLabel.style.right = '45px';
+            maxMarkerLabel.style.bottom = `${position}%`;
+            maxMarkerLabel.style.fontSize = '10px';
+            maxMarkerLabel.style.transform = 'translateY(50%)';
+            maxMarkerLabel.textContent = `Max: ${colorMaxValue}`;
+            maxMarkerLabel.style.fontWeight = 'bold';
+            
+            legendContainer.appendChild(maxMarker);
+            legendContainer.appendChild(maxMarkerLabel);
+        }
+    }
+    
+    // Add to the container
+    graphContainer.appendChild(legendContainer);
+}
+
 // Function to update Y-axis scale for scatter plots
 function updateScatterYAxisScale(chartInstance, visibleData) {
     // Extract Y values from scatter datasets
@@ -458,14 +991,14 @@ function updateStandardYAxisScale(chartInstance, visibleData) {
 function updatePositionIndicator(start, end, total) {
     // Update text display
     if (dataPositionSpan) {
-        dataPositionSpan.textContent = `${start + 1} - ${end} of ${total}`;
+        dataPositionSpan.textContent = `${start + 1} - ${end} of ${total} (Step: ${NAVIGATION_STEP_SIZE})`;
     }
     
-    // Update chart title to show position
+    // Update chart title to show position and settings
     if (chartInstance && chartInstance.options.plugins.title.originalText) {
         const scrollPercent = Math.round((start / Math.max(1, total - MAX_DISPLAY_POINTS)) * 100);
         chartInstance.options.plugins.title.text = 
-            `${chartInstance.options.plugins.title.originalText} (Position: ${scrollPercent}%)`;
+            `${chartInstance.options.plugins.title.originalText} (${MAX_DISPLAY_POINTS} points, position: ${scrollPercent}%)`;
     }
     
     // Enable/disable navigation buttons based on position
@@ -869,6 +1402,11 @@ function generateGraph() {
     try {
         console.log("Generating graph with data:", csvData.length, "rows");
         
+        // Update display settings from input fields if they exist
+        if (document.getElementById('display-points') && document.getElementById('step-size')) {
+            updateDisplaySettings();
+        }
+        
         const graphType = graphTypeSelect.value;
         const xAxis = xAxisSelect.value;
         const yAxis = yAxisSelect.value;
@@ -887,6 +1425,7 @@ function generateGraph() {
         
         console.log("Selected axes:", xAxis, yAxis, "Color by:", colorAxis, 
                    "Normalize:", normalizeColors, "Range:", colorMinValue, colorMaxValue);
+        console.log("Display settings:", MAX_DISPLAY_POINTS, "points, step size", NAVIGATION_STEP_SIZE);
         
         // Reset data view position
         currentDataStart = 0;
@@ -1105,6 +1644,9 @@ function generateGraph() {
                 dataControls.style.display = 'flex';
                 graphContainer.classList.add('scrollable');
                 updatePositionIndicator(0, Math.min(displayPoints, labels.length), labels.length);
+                
+                // Update data controls to show new step size
+                enhanceDataControls(dataControls);
             } else {
                 dataControls.style.display = 'none';
                 graphContainer.classList.remove('scrollable');
@@ -1206,62 +1748,6 @@ function cleanupColorLegend() {
         existingLegend.remove();
     }
 }
-
-// Function to update or create color legend
-function updateColorLegend(minVal, maxVal) {
-    // Clean up any existing legend first
-    cleanupColorLegend();
-    
-    // Create new legend container
-    const legendContainer = document.createElement('div');
-    legendContainer.className = 'color-gradient-legend';
-    legendContainer.style.position = 'absolute';
-    legendContainer.style.right = '10px';
-    legendContainer.style.top = '50px';
-    legendContainer.style.width = '30px';
-    legendContainer.style.height = '200px';
-    legendContainer.style.background = 'linear-gradient(to top, blue, white, red)';
-    legendContainer.style.borderRadius = '4px';
-    legendContainer.style.boxShadow = '0 1px 3px rgba(0,0,0,0.2)';
-    legendContainer.style.zIndex = '10';
-    
-    // Add scale values
-    const minLabel = document.createElement('div');
-    minLabel.style.position = 'absolute';
-    minLabel.style.bottom = '0';
-    minLabel.style.right = '35px';
-    minLabel.style.fontSize = '12px';
-    minLabel.textContent = minVal.toFixed(1);
-    
-    const zeroLabel = document.createElement('div');
-    zeroLabel.style.position = 'absolute';
-    zeroLabel.style.top = '50%';
-    zeroLabel.style.right = '35px';
-    zeroLabel.style.fontSize = '12px';
-    zeroLabel.style.transform = 'translateY(-50%)';
-    zeroLabel.textContent = '0';
-    
-    const maxLabel = document.createElement('div');
-    maxLabel.style.position = 'absolute';
-    maxLabel.style.top = '0';
-    maxLabel.style.right = '35px';
-    maxLabel.style.fontSize = '12px';
-    maxLabel.textContent = maxVal.toFixed(1);
-    
-    legendContainer.appendChild(minLabel);
-    legendContainer.appendChild(zeroLabel);
-    legendContainer.appendChild(maxLabel);
-    
-    // Add to the container
-    graphContainer.appendChild(legendContainer);
-}
-
-// Update destroy chart instance to clean up color legend
-const originalDestroyFunction = Chart.prototype.destroy;
-Chart.prototype.destroy = function() {
-    cleanupColorLegend();
-    return originalDestroyFunction.apply(this, arguments);
-};
 
 // Function to create chart configuration
 function createChartConfig(type, labels, data, xAxisLabel, yAxisLabel, colors, colorData, colorAxis, xValues) {
@@ -1641,7 +2127,7 @@ function createChartConfig(type, labels, data, xAxisLabel, yAxisLabel, colors, c
     if (fullDataset.labels.length > MAX_DISPLAY_POINTS) {
         config.options.plugins.subtitle = {
             display: true,
-            text: `Showing ${currentDataStart+1}-${Math.min(currentDataStart+MAX_DISPLAY_POINTS, fullDataset.labels.length)} of ${fullDataset.labels.length} data points`,
+            text: `Showing ${currentDataStart+1}-${Math.min(currentDataStart+MAX_DISPLAY_POINTS, fullDataset.labels.length)} of ${fullDataset.labels.length} data points (Step: ${NAVIGATION_STEP_SIZE})`,
             padding: {
                 bottom: 10
             }
@@ -1649,4 +2135,11 @@ function createChartConfig(type, labels, data, xAxisLabel, yAxisLabel, colors, c
     }
     
     return config;
-} 
+}
+
+// Update destroy chart instance to clean up color legend
+const originalDestroyFunction = Chart.prototype.destroy;
+Chart.prototype.destroy = function() {
+    cleanupColorLegend();
+    return originalDestroyFunction.apply(this, arguments);
+}; 
