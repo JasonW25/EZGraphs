@@ -25,6 +25,7 @@ const tooltip = d3.select("body")
 // Global variables for data management
 let fullData = [];
 let currentStartIndex = 0;
+let isFullscreen = false;
 
 // Handle window resize
 window.addEventListener('resize', () => {
@@ -33,6 +34,60 @@ window.addEventListener('resize', () => {
         updateVisualization();
     }
 });
+
+// Fullscreen toggle
+document.getElementById('fullscreen-btn').addEventListener('click', function() {
+    const plotContainer = document.getElementById('plot');
+    isFullscreen = true;
+    
+    plotContainer.classList.add('fullscreen');
+    this.style.display = 'none';
+    document.getElementById('exit-fullscreen').style.display = 'block';
+    document.querySelector('.navigation').style.display = 'none';
+    document.querySelector('.fullscreen-navigation').style.display = 'block';
+    
+    // Update fullscreen data position display
+    updateFullscreenPositionText();
+    
+    // Wait for transition to complete
+    setTimeout(() => {
+        width = getPlotWidth() - margin.left - margin.right;
+        if (fullData.length > 0) {
+            updateVisualization();
+        }
+    }, 300);
+});
+
+// Exit fullscreen button
+document.getElementById('exit-fullscreen').addEventListener('click', function() {
+    const plotContainer = document.getElementById('plot');
+    isFullscreen = false;
+    
+    plotContainer.classList.remove('fullscreen');
+    this.style.display = 'none';
+    document.getElementById('fullscreen-btn').style.display = 'block';
+    document.querySelector('.navigation').style.display = 'block';
+    document.querySelector('.fullscreen-navigation').style.display = 'none';
+    
+    // Wait for transition to complete
+    setTimeout(() => {
+        width = getPlotWidth() - margin.left - margin.right;
+        if (fullData.length > 0) {
+            updateVisualization();
+        }
+    }, 300);
+});
+
+// Function to update the fullscreen position text
+function updateFullscreenPositionText() {
+    if (!fullData.length) return;
+    
+    const displayPoints = +d3.select("#display-points").property("value");
+    const end = Math.min(currentStartIndex + displayPoints, fullData.length);
+    const positionText = `${currentStartIndex + 1} - ${end} of ${fullData.length}`;
+    
+    d3.select("#fullscreen-data-position").text(positionText);
+}
 
 // Function to process and visualize data
 function processData(data) {
@@ -69,15 +124,24 @@ function processData(data) {
     // Show controls and navigation
     d3.select('.controls').style('display', 'block');
     d3.select('.navigation').style('display', 'block');
+    document.getElementById('fullscreen-btn').style.display = 'block';
 
     // Function to update data window position text
     function updatePositionText() {
         const displayPoints = +d3.select("#display-points").property("value");
         const end = Math.min(currentStartIndex + displayPoints, fullData.length);
-        d3.select("#data-position").text(
-            `${currentStartIndex + 1} - ${end} of ${fullData.length}`
-        );
+        const positionText = `${currentStartIndex + 1} - ${end} of ${fullData.length}`;
+        
+        d3.select("#data-position").text(positionText);
+        
+        // Also update fullscreen position text if in fullscreen mode
+        if (isFullscreen) {
+            d3.select("#fullscreen-data-position").text(positionText);
+        }
     }
+    
+    // Make updatePositionText accessible globally
+    window.updatePositionText = updatePositionText;
 
     // Declare updateVisualization in global scope so we can call it from window resize
     window.updateVisualization = function() {
@@ -174,7 +238,7 @@ function processData(data) {
         updatePositionText();
     };
 
-    // Navigation event handlers
+    // Navigation event handlers - regular mode
     d3.select("#prev-btn").on("click", () => {
         const displayPoints = +d3.select("#display-points").property("value");
         currentStartIndex = Math.max(0, currentStartIndex - displayPoints);
@@ -182,6 +246,21 @@ function processData(data) {
     });
 
     d3.select("#next-btn").on("click", () => {
+        const displayPoints = +d3.select("#display-points").property("value");
+        if (currentStartIndex + displayPoints < fullData.length) {
+            currentStartIndex += displayPoints;
+            updateVisualization();
+        }
+    });
+    
+    // Navigation event handlers - fullscreen mode
+    d3.select("#fullscreen-prev-btn").on("click", () => {
+        const displayPoints = +d3.select("#display-points").property("value");
+        currentStartIndex = Math.max(0, currentStartIndex - displayPoints);
+        updateVisualization();
+    });
+
+    d3.select("#fullscreen-next-btn").on("click", () => {
         const displayPoints = +d3.select("#display-points").property("value");
         if (currentStartIndex + displayPoints < fullData.length) {
             currentStartIndex += displayPoints;
