@@ -3,84 +3,127 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>EZGraphs - CSV Data Visualizer</title>
-    <link rel="stylesheet" href="styles.css">
+    <title>CSV Dot Plot Visualizer</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            max-width: 1200px;
+            margin: 20px auto;
+        }
+        .file-input {
+            margin-bottom: 20px;
+            padding: 15px;
+            background: #f5f5f5;
+            border-radius: 5px;
+        }
+        .file-input label {
+            display: block;
+            margin-bottom: 10px;
+            font-weight: bold;
+        }
+        .controls {
+            margin-bottom: 20px;
+            padding: 15px;
+            background: #f5f5f5;
+            border-radius: 5px;
+            display: none;
+        }
+        .control-group {
+            margin: 10px 0;
+        }
+        .control-group label {
+            display: inline-block;
+            width: 120px;
+            font-weight: bold;
+            margin-right: 10px;
+        }
+        select, input[type="number"] {
+            min-width: 200px;
+            padding: 8px;
+            border-radius: 4px;
+            border: 1px solid #ddd;
+        }
+        #plot {
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            background: white;
+            overflow-x: auto;
+            width: 100%;
+            height: 600px;
+        }
+        #plot svg {
+            width: 100%;
+            height: 100%;
+        }
+        .tooltip {
+            position: absolute;
+            background: white;
+            border: 1px solid #ddd;
+            padding: 10px;
+            pointer-events: none;
+            opacity: 0;
+            border-radius: 4px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .navigation {
+            margin-top: 10px;
+            text-align: center;
+            display: none;
+        }
+        .navigation button {
+            padding: 8px 15px;
+            margin: 0 5px;
+            border-radius: 4px;
+            border: 1px solid #ddd;
+            background: white;
+            cursor: pointer;
+        }
+        .navigation button:hover {
+            background: #f0f0f0;
+        }
+        #data-position {
+            margin: 0 10px;
+            font-weight: bold;
+        }
+    </style>
 </head>
 <body>
-    <div class="container">
-        <h1>EZGraphs</h1>
-        <div class="file-upload">
-            <h2>Upload CSV File</h2>
-            <input type="file" id="csv-file" accept=".csv">
+    <div class="file-input">
+        <label for="csv-file">Select CSV File:</label>
+        <input type="file" id="csv-file" accept=".csv">
+    </div>
+    <div class="controls">
+        <div class="control-group">
+            <label for="x-axis-select">X-Axis:</label>
+            <select id="x-axis-select">
+                <option value="">Select X-Axis Column</option>
+            </select>
         </div>
-        
-        <div class="data-preview">
-            <h2>Data Preview</h2>
-            <div id="data-table-container"></div>
+        <div class="control-group">
+            <label for="y-axis-select">Y-Axis:</label>
+            <select id="y-axis-select">
+                <option value="">Select Y-Axis Column</option>
+            </select>
         </div>
-        
-        <div class="graph-options">
-            <h2>Graph Options</h2>
-            <div class="options-form">
-                <div class="form-group">
-                    <label for="graph-type">Graph Type:</label>
-                    <select id="graph-type">
-                        <option value="line">Line Chart</option>
-                        <option value="bar">Bar Chart</option>
-                        <option value="scatter">Scatter Plot</option>
-                        <option value="bubble">Dot Plot</option>
-                        <option value="pie">Pie Chart</option>
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label for="x-axis">X-Axis:</label>
-                    <select id="x-axis"></select>
-                </div>
-                <div class="form-group">
-                    <label for="y-axis">Y-Axis:</label>
-                    <select id="y-axis"></select>
-                </div>
-                <div class="form-group" id="color-group" style="display: none;">
-                    <label for="color-axis">Color By:</label>
-                    <select id="color-axis">
-                        <option value="">No Color Grouping</option>
-                    </select>
-                </div>
-                <div class="form-group" id="color-normalize-group" style="display: none;">
-                    <label for="color-normalize">
-                        <input type="checkbox" id="color-normalize"> Normalize Color (Blue < 0 < Red)
-                    </label>
-                    <div id="normalize-range" style="display: none; margin-top: 10px;">
-                        <div class="range-item">
-                            <label for="min-value">Min Value:</label>
-                            <input type="number" id="min-value" placeholder="Auto" step="any">
-                        </div>
-                        <div class="range-item">
-                            <label for="max-value">Max Value:</label>
-                            <input type="number" id="max-value" placeholder="Auto" step="any">
-                        </div>
-                    </div>
-                </div>
-                <button id="generate-graph">Generate Graph</button>
-            </div>
+        <div class="control-group">
+            <label for="color-column-select">Color By:</label>
+            <select id="color-column-select">
+                <option value="">Select Color Column (Optional)</option>
+            </select>
         </div>
-        
-        <div class="graph-container">
-            <button class="fullscreen-btn" id="fullscreen-toggle">Fullscreen</button>
-            <canvas id="graph"></canvas>
-            <div class="data-controls" style="display: none;">
-                <button id="scroll-left">← Previous</button>
-                <span id="data-position">0 - 0 of 0</span>
-                <button id="scroll-right">Next →</button>
-            </div>
+        <div class="control-group">
+            <label for="display-points">Points to Show:</label>
+            <input type="number" id="display-points" min="10" value="50" step="10">
         </div>
     </div>
-
-    <!-- Chart.js CDN -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <!-- PapaParse for CSV parsing -->
-    <script src="https://cdn.jsdelivr.net/npm/papaparse@5.3.0/papaparse.min.js"></script>
-    <!-- Custom script -->
+    <div id="plot"></div>
+    <div class="navigation">
+        <button id="prev-btn">← Previous</button>
+        <span id="data-position">0 - 0 of 0</span>
+        <button id="next-btn">Next →</button>
+    </div>
     <script src="script.js"></script>
 </body>
 </html> 
