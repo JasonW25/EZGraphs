@@ -15,10 +15,16 @@
     <div id="merge-input" class="file-input" style="display: none;">
         <label for="merge-csv-file">Select CSV File to Merge:</label>
         <input type="file" id="merge-csv-file" accept=".csv">
-        <button id="merge-btn" style="margin-top: 10px;">Merge Columns</button>
+        <button id="load-merge-file-btn" style="margin-top: 10px;">Load Merge File</button>
         <p id="merge-status" style="margin-top: 10px; color: red;"></p>
     </div>
-    <div class="controls">
+    <div id="merge-column-selection" class="controls" style="display: none;">
+        <h4>Select columns to merge and rename (optional):</h4>
+        <div id="merge-options-container"></div>
+        <button id="confirm-merge-btn" style="margin-top: 15px;">Confirm Merge</button>
+        <p id="confirm-merge-status" style="margin-top: 10px; color: red;"></p>
+    </div>
+    <div id="main-controls" class="controls">
         <div class="control-group">
             <label for="x-axis-select">X-Axis:</label>
             <select id="x-axis-select">
@@ -38,8 +44,16 @@
             </select>
         </div>
         <div class="control-group">
+            <label for="color-intensity-input">Intensity Point:</label>
+            <input type="number" id="color-intensity-input" value="1" min="0.01" step="0.1" title="Value at which color is max intensity (blue/red)">
+        </div>
+        <div class="control-group">
             <label for="display-points">Points to Show:</label>
             <input type="number" id="display-points" min="10" value="50" step="10">
+        </div>
+        <div class="control-group">
+            <label for="y-grid-interval">Y Grid Interval:</label>
+            <input type="number" id="y-grid-interval" value="10" min="1" step="1" title="Interval for horizontal grid lines">
         </div>
     </div>
     <div class="plot-container">

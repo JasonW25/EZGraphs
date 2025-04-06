@@ -26,6 +26,7 @@ const tooltip = d3.select("body")
 let fullData = [];
 let currentStartIndex = 0;
 let isFullscreen = false;
+let mergeDataCache = null; // Cache for parsed merge file data
 
 // Handle window resize
 window.addEventListener('resize', () => {
@@ -126,7 +127,7 @@ function parseDataTypes(data) {
     });
     return data;
 }
-
+    
 // Function to populate dropdown menus
 function populateDropdowns(columns) {
     ['x-axis-select', 'y-axis-select', 'color-column-select'].forEach(id => {
@@ -146,7 +147,7 @@ function populateDropdowns(columns) {
 
 // Function to update UI elements after data is loaded or modified
 function updateUIAfterDataChange() {
-    d3.select('.controls').style('display', 'block');
+    d3.select('#main-controls').style('display', 'block');
     d3.select('.navigation').style('display', 'block');
     document.getElementById('fullscreen-btn').style.display = 'block';
     // Show merge input section only if primary data is loaded
@@ -165,34 +166,55 @@ function processPrimaryData(data) {
     const columns = Object.keys(fullData[0] || {});
     populateDropdowns(columns);
     updateUIAfterDataChange();
+    // Clear merge cache and hide selection UI when a new primary file is loaded
+    mergeDataCache = null;
+    d3.select('#merge-column-selection').style('display', 'none');
+    d3.select('#merge-options-container').html(null);
+    d3.select("#merge-status").text("");
+    d3.select("#confirm-merge-status").text("");
+    d3.select("#merge-csv-file").property('value', ''); // Reset merge file input
     // Initial visualization update if axes are selected
     window.updateVisualization(); 
 }
 
-// Function to update data window position text
-function updatePositionText() {
+    // Function to update data window position text
+    function updatePositionText() {
     if (!fullData.length) return;
-    const displayPoints = +d3.select("#display-points").property("value");
-    const end = Math.min(currentStartIndex + displayPoints, fullData.length);
-    const positionText = `${currentStartIndex + 1} - ${end} of ${fullData.length}`;
-    
-    d3.select("#data-position").text(positionText);
-    
-    // Also update fullscreen position text if in fullscreen mode
-    if (isFullscreen) {
+        const displayPoints = +d3.select("#display-points").property("value");
+        const end = Math.min(currentStartIndex + displayPoints, fullData.length);
+        const positionText = `${currentStartIndex + 1} - ${end} of ${fullData.length}`;
+        
+        d3.select("#data-position").text(positionText);
+        
+        // Also update fullscreen position text if in fullscreen mode
+        if (isFullscreen) {
         updateFullscreenPositionText(); // Reuse the specific function
+        }
     }
-}
-
+    
 // Make updatePositionText accessible globally if needed elsewhere (check usage)
 // window.updatePositionText = updatePositionText; // Keep if needed by other parts, remove if not
 
-// Declare updateVisualization in global scope so we can call it from window resize
-window.updateVisualization = function() {
-    const xColumn = d3.select("#x-axis-select").property("value");
-    const yColumn = d3.select("#y-axis-select").property("value");
-    const colorColumn = d3.select("#color-column-select").property("value");
-    const displayPoints = +d3.select("#display-points").property("value");
+    // Declare updateVisualization in global scope so we can call it from window resize
+    window.updateVisualization = function() {
+        const xColumn = d3.select("#x-axis-select").property("value");
+        const yColumn = d3.select("#y-axis-select").property("value");
+        const colorColumn = d3.select("#color-column-select").property("value");
+        const displayPoints = +d3.select("#display-points").property("value");
+        let colorIntensityPoint = +d3.select("#color-intensity-input").property("value");
+        let yGridInterval = +d3.select("#y-grid-interval").property("value");
+
+        // Validate color intensity point (must be positive)
+        if (isNaN(colorIntensityPoint) || colorIntensityPoint <= 0) {
+            colorIntensityPoint = 1; // Default to 1 if invalid
+            d3.select("#color-intensity-input").property("value", 1); // Correct the input field
+        }
+
+        // Validate grid interval (must be positive)
+        if (isNaN(yGridInterval) || yGridInterval <= 0) {
+            yGridInterval = 10; // Default if invalid
+            d3.select("#y-grid-interval").property("value", yGridInterval);
+        }
 
     // Check if essential columns are selected or if there's no data
     if (!xColumn || !yColumn || !fullData.length) {
@@ -202,11 +224,11 @@ window.updateVisualization = function() {
         return;
     }
 
-    // Update width based on current container size
-    width = getPlotWidth() - margin.left - margin.right;
+        // Update width based on current container size
+        width = getPlotWidth() - margin.left - margin.right;
 
     // Get visible data window *after* basic checks pass
-    const visibleData = fullData.slice(currentStartIndex, currentStartIndex + displayPoints);
+        const visibleData = fullData.slice(currentStartIndex, currentStartIndex + displayPoints);
 
     // Check if the slice actually contains data
     if (!visibleData.length) {
@@ -216,81 +238,141 @@ window.updateVisualization = function() {
     }
 
     // Clear previous elements (only if we have data to plot)
-    svg.selectAll("*").remove();
+        svg.selectAll("*").remove();
 
-    // Create scales
-    const xScale = (fullData[0][xColumn] instanceof Date) 
-        ? d3.scaleTime()
-        : d3.scaleLinear();
-    
-    xScale
-        .domain(d3.extent(visibleData, d => d[xColumn]))
-        .range([0, width]);
+        // Determine if X column is Date type
+        const isXDate = visibleData.length > 0 && visibleData[0][xColumn] instanceof Date;
 
-    const yScale = d3.scaleLinear()
-        .domain(d3.extent(visibleData, d => d[yColumn]))
-        .range([height, 0]);
+        // Create scales
+        let xScale;
+        let uniqueDates = []; // Declare uniqueDates here
 
-    // Create color scale
-    const colorScale = d3.scaleLinear()
-        .domain([-1, 0, 1])
-        .range(["blue", "gray", "red"]);
-
-    // Add axes
-    svg.append("g")
-        .attr("transform", `translate(0,${height})`)
-        .call(d3.axisBottom(xScale))
-        .append("text")
-        .attr("x", width / 2)
-        .attr("y", 40)
-        .attr("fill", "black")
-        .style("text-anchor", "middle")
-        .text(xColumn);
-
-    svg.append("g")
-        .call(d3.axisLeft(yScale))
-        .append("text")
-        .attr("transform", "rotate(-90)")
-        .attr("y", -40)
-        .attr("x", -height / 2)
-        .attr("fill", "black")
-        .style("text-anchor", "middle")
-        .text(yColumn);
-
-    // Add dots
-    svg.selectAll("circle")
-        .data(visibleData)
-        .enter()
-        .append("circle")
-        .attr("cx", d => xScale(d[xColumn]))
-        .attr("cy", d => yScale(d[yColumn]))
-        .attr("r", 5)
-        .attr("fill", d => {
-            if (colorColumn && !isNaN(d[colorColumn])) {
-                const value = d[colorColumn];
-                const normalizedValue = Math.max(-1, Math.min(1, value));
-                return colorScale(normalizedValue);
-            }
-            return "steelblue";
-        })
-        .attr("opacity", 0.7)
-        .on("mouseover", function(event, d) {
-            d3.select(this)
-                .attr("r", 8)
-                .attr("opacity", 1);
+        if (isXDate) {
+            // Use scalePoint for Date axes to skip gaps
+            uniqueDates = [...new Set(visibleData.map(d => d[xColumn].getTime()))] // Assign value here
+                                .map(time => new Date(time)) 
+                                .sort((a, b) => a - b); 
             
-            tooltip.style("opacity", 1)
-                .html(`${xColumn}: ${d[xColumn]}<br/>${yColumn}: ${d[yColumn]}${colorColumn ? `<br/>${colorColumn}: ${d[colorColumn]}` : ""}`)
-                .style("left", (event.pageX + 10) + "px")
-                .style("top", (event.pageY - 10) + "px");
-        })
-        .on("mouseout", function() {
-            d3.select(this)
-                .attr("r", 5)
-                .attr("opacity", 0.7);
+            xScale = d3.scalePoint()
+                .domain(uniqueDates) 
+                .range([0, width])
+                .padding(0.5); 
+        } else {
+            // Use scaleLinear for numerical axes
+            xScale = d3.scaleLinear()
+                .domain(d3.extent(visibleData, d => d[xColumn]))
+                .range([0, width]);
+        }
+        
+        const yScale = d3.scaleLinear()
+            .domain(d3.extent(visibleData, d => d[yColumn]))
+            .range([height, 0]);
+
+        // Create color scale dynamically based on input
+        const colorScale = d3.scaleLinear()
+            .domain([-colorIntensityPoint, 0, colorIntensityPoint]) // Use dynamic intensity point
+            .range(["blue", "#b0b0b0", "red"]);
+
+        // -- Add Horizontal Grid Lines --
+        const yDomain = yScale.domain();
+        const yMin = Math.floor(yDomain[0] / yGridInterval) * yGridInterval;
+        const yMax = Math.ceil(yDomain[1] / yGridInterval) * yGridInterval;
+        const yTickValues = d3.range(yMin, yMax + yGridInterval, yGridInterval);
+
+        svg.append("g")
+            .attr("class", "grid")
+            .call(d3.axisLeft(yScale)
+                .tickValues(yTickValues)
+                .tickSize(-width) // Lines span the width
+                .tickFormat("") // No labels on grid lines
+            )
+            .selectAll(".tick line") // Style the grid lines
+                .attr("stroke", "#cccccc") // Darker grey for grid
+                .attr("stroke-opacity", 0.7);
+        // -------------------------------
+
+        // Add axes
+        const xAxis = d3.axisBottom(xScale);
+
+        if (isXDate) {
+            // Customize ticks for Date scalePoint axis
+            // Now uniqueDates should be accessible here
+            const numTicks = Math.min(uniqueDates.length, Math.floor(width / 80)); 
+            const tickValues = uniqueDates.length > numTicks 
+                ? uniqueDates.filter((d, i) => i % Math.ceil(uniqueDates.length / numTicks) === 0) 
+                : uniqueDates; 
             
-            tooltip.style("opacity", 0);
-        });
+            xAxis.tickValues(tickValues)
+                 .tickFormat(d3.timeFormat("%Y-%m-%d %H:%M"));
+        }
+        
+        // Append X axis group first
+        const xAxisGroup = svg.append("g")
+            .attr("transform", `translate(0,${height})`)
+            .call(xAxis);
+
+        // Select ticks within the group for styling IF they exist
+        xAxisGroup.selectAll(".tick text") // More specific selector for tick labels
+            .style("text-anchor", "end")
+            .attr("dx", "-.8em")
+            .attr("dy", ".15em")
+            .attr("transform", "rotate(-45)"); 
+        
+        // Append the X axis label to the axis group
+        xAxisGroup.append("text") 
+            .attr("x", width / 2)
+            .attr("y", 50) // Adjust position due to potentially rotated ticks
+            .attr("fill", "black")
+            .style("text-anchor", "middle")
+            // .attr("transform", null) // This is likely not needed here
+            .text(xColumn);
+
+        // Append Y axis group and label
+        svg.append("g")
+            .call(d3.axisLeft(yScale))
+            .append("text")
+            .attr("transform", "rotate(-90)")
+            .attr("y", -40)
+            .attr("x", -height / 2)
+            .attr("fill", "black")
+            .style("text-anchor", "middle")
+            .text(yColumn);
+
+        // Add dots
+        svg.selectAll("circle")
+            .data(visibleData)
+            .enter()
+            .append("circle")
+            .attr("cx", d => xScale(d[xColumn]))
+            .attr("cy", d => yScale(d[yColumn]))
+            .attr("r", 5)
+            .attr("fill", d => {
+                if (colorColumn && !isNaN(d[colorColumn])) {
+                    const value = d[colorColumn];
+                    // Clamp the value to the dynamic domain before scaling
+                    const clampedValue = Math.max(-colorIntensityPoint, Math.min(colorIntensityPoint, value)); 
+                    return colorScale(clampedValue);
+                }
+                return "steelblue"; // Default color if no color column or non-numeric
+            })
+            .attr("opacity", 0.7)
+            .on("mouseover", function(event, d) {
+                d3.select(this)
+                    .attr("r", 8)
+                    .attr("opacity", 1);
+                
+                tooltip.style("opacity", 1)
+                    .html(`${xColumn}: ${d[xColumn]}<br/>${yColumn}: ${d[yColumn]}${colorColumn ? `<br/>${colorColumn}: ${d[colorColumn]}` : ""}`)
+                    .style("left", (event.pageX + 10) + "px")
+                    .style("top", (event.pageY - 10) + "px");
+            })
+            .on("mouseout", function() {
+                d3.select(this)
+                    .attr("r", 5)
+                    .attr("opacity", 0.7);
+                
+                tooltip.style("opacity", 0);
+            });
 
     updatePositionText(); // Ensure position text is updated
 };
@@ -314,11 +396,21 @@ d3.select("#csv-file").on("change", function(event) {
     }
 });
 
-// Event listener for merge file input button
-d3.select("#merge-btn").on("click", function() {
+// Event listener for loading the merge file (Step 1)
+d3.select("#load-merge-file-btn").on("click", function() {
     const mergeFileInput = document.getElementById('merge-csv-file');
     const mergeFile = mergeFileInput.files[0];
     const mergeStatus = d3.select("#merge-status");
+    const columnSelectionDiv = d3.select('#merge-column-selection');
+    const optionsContainer = d3.select('#merge-options-container');
+    const confirmStatus = d3.select("#confirm-merge-status");
+
+    // Clear previous states
+    mergeStatus.text("");
+    confirmStatus.text("");
+    optionsContainer.html(null); // Clear old options
+    columnSelectionDiv.style('display', 'none');
+    mergeDataCache = null;
 
     if (!fullData.length) {
         mergeStatus.text("Load the primary CSV file first.");
@@ -329,59 +421,57 @@ d3.select("#merge-btn").on("click", function() {
         const reader = new FileReader();
         reader.onload = function(e) {
             const text = e.target.result;
-            let mergeData;
+            let tempData;
             try {
-                mergeData = d3.csvParse(text);
-                mergeData = parseDataTypes(mergeData); // Parse types for merge data
+                tempData = d3.csvParse(text);
+                if (!tempData || tempData.length === 0) throw new Error("CSV is empty or invalid.");
+                tempData = parseDataTypes(tempData); // Parse types for merge data
             } catch (error) {
                  mergeStatus.text(`Error parsing merge CSV: ${error.message}`);
                  return;
             }
 
-
-            if (mergeData.length !== fullData.length) {
-                mergeStatus.text(`Row count mismatch: Primary (${fullData.length}) vs Merge (${mergeData.length}).`);
+            if (tempData.length !== fullData.length) {
+                mergeStatus.text(`Row count mismatch: Primary (${fullData.length}) vs Merge (${tempData.length}). Cannot merge.`);
                 return;
             }
 
-            // Merge columns
-            const originalColumns = Object.keys(fullData[0] || {});
-            const mergeColumns = Object.keys(mergeData[0] || {});
-            
-            fullData = fullData.map((primaryRow, index) => {
-                const mergeRow = mergeData[index];
-                mergeColumns.forEach(col => {
-                    // Avoid overwriting existing columns from the primary file for now
-                    // A more robust solution might involve prefixing or user choice
-                    if (!originalColumns.includes(col)) { 
-                        primaryRow[col] = mergeRow[col];
-                    } else {
-                        // Handle duplicate column names if necessary (e.g., prefix)
-                        // For simplicity, we are currently skipping duplicates.
-                        console.warn(`Skipping duplicate column from merge file: ${col}`);
-                    }
-                });
-                return primaryRow;
+            // Store parsed data in cache
+            mergeDataCache = tempData;
+            const mergeColumns = Object.keys(mergeDataCache[0] || {});
+
+            if (mergeColumns.length === 0) {
+                mergeStatus.text("Merge file has no columns.");
+                mergeDataCache = null;
+                return;
+            }
+
+            // Build the column selection UI
+            mergeColumns.forEach(col => {
+                const controlGroup = optionsContainer.append('div').attr('class', 'control-group');
+                
+                controlGroup.append('input')
+                    .attr('type', 'checkbox')
+                    .attr('id', `merge-col-cb-${col}`)
+                    .attr('value', col)
+                    .property('checked', true); // Check by default
+                
+                controlGroup.append('label')
+                    .attr('for', `merge-col-cb-${col}`)
+                    .text(` ${col} `) // Add spacing around label
+                    .style('margin-right', '10px')
+                    .style('width', 'auto'); // Override default label width
+                
+                controlGroup.append('input')
+                    .attr('type', 'text')
+                    .attr('id', `merge-col-rename-${col}`)
+                    .attr('data-original-column', col) // Link to original name
+                    .attr('placeholder', 'New name (optional)')
+                    .style('width', '200px'); // Adjust width as needed
             });
 
-            // Update dropdowns with new combined columns
-            const combinedColumns = Object.keys(fullData[0] || {});
-            populateDropdowns(combinedColumns);
-
-            mergeStatus.text("Merge successful! Columns added.").style('color', 'green');
-            // Optionally hide merge section after successful merge
-            // d3.select('#merge-input').style('display', 'none'); 
-            
-            // Clear the file input for merge
-            mergeFileInput.value = ''; 
-
-            // Update visualization if axes are selected
-            window.updateVisualization(); 
-            
-            // Clear the success message after a few seconds
-             setTimeout(() => {
-                mergeStatus.text("").style('color', 'red'); // Reset color for potential errors
-            }, 5000); 
+            mergeStatus.text("Merge file loaded. Select columns and confirm."); // Inform user
+            columnSelectionDiv.style('display', 'block'); // Show the selection UI
 
         };
         reader.onerror = function() {
@@ -394,48 +484,135 @@ d3.select("#merge-btn").on("click", function() {
     }
 });
 
+// Event listener for confirming the merge (Step 2)
+d3.select("#confirm-merge-btn").on("click", function() {
+    const optionsContainer = d3.select('#merge-options-container');
+    const confirmStatus = d3.select("#confirm-merge-status");
+    const mergeStatus = d3.select("#merge-status"); // To show final success
+    const checkboxes = optionsContainer.selectAll('input[type="checkbox"]');
+    
+    confirmStatus.text(""); // Clear previous status
+
+    if (!mergeDataCache) {
+        confirmStatus.text("Error: No merge data loaded. Please load merge file again.");
+        return;
+    }
+
+    let columnsToMerge = {};
+    let hasError = false;
+    const currentPrimaryColumns = Object.keys(fullData[0] || {});
+
+    checkboxes.each(function() {
+        const checkbox = d3.select(this);
+        if (checkbox.property('checked')) {
+            const originalCol = checkbox.property('value');
+            const renameInput = optionsContainer.select(`#merge-col-rename-${originalCol}`);
+            let newName = renameInput.property('value').trim();
+            
+            if (!newName) {
+                newName = originalCol; // Use original if rename is empty
+            }
+
+            // Validation: Check if new name conflicts with *existing* primary columns
+            if (currentPrimaryColumns.includes(newName)) {
+                 confirmStatus.text(`Error: Column name "${newName}" already exists in primary data. Choose a different name.`);
+                 hasError = true;
+                 return; // Stop .each loop early if possible (though it might not fully stop)
+            }
+            
+            // Validation: Check if the *new* name conflicts with other *new* names being added in this batch
+            if (Object.values(columnsToMerge).includes(newName)){
+                confirmStatus.text(`Error: You are trying to rename multiple columns to "${newName}". Choose unique names.`);
+                hasError = true;
+                return;
+            }
+
+            columnsToMerge[originalCol] = newName;
+        }
+    });
+
+    if (hasError) {
+        return; // Stop if validation failed
+    }
+
+    if (Object.keys(columnsToMerge).length === 0) {
+        confirmStatus.text("No columns selected to merge.");
+        return;
+    }
+
+    // Perform the actual merge
+    fullData = fullData.map((primaryRow, index) => {
+        const mergeRow = mergeDataCache[index];
+        for (const [originalName, newName] of Object.entries(columnsToMerge)) {
+            primaryRow[newName] = mergeRow[originalName];
+        }
+        return primaryRow;
+    });
+
+    // Update UI
+    const combinedColumns = Object.keys(fullData[0] || {});
+    populateDropdowns(combinedColumns);
+    window.updateVisualization();
+
+    // Cleanup
+    mergeDataCache = null;
+    d3.select('#merge-column-selection').style('display', 'none');
+    optionsContainer.html(null);
+    confirmStatus.text(""); 
+    mergeStatus.text("Merge successful! Selected columns added.").style('color', 'green');
+    d3.select("#merge-csv-file").property('value', ''); // Clear the file input
+
+    // Clear success message after a few seconds
+    setTimeout(() => {
+        mergeStatus.text("").style('color', 'red'); // Reset color
+    }, 5000);
+});
+
 // Initial setup: Hide controls and navigation until data is loaded
-d3.select('.controls').style('display', 'none');
+d3.select('#main-controls').style('display', 'none');
 d3.select('.navigation').style('display', 'none');
 document.getElementById('fullscreen-btn').style.display = 'none';
 d3.select('#merge-input').style('display', 'none'); // Keep merge hidden initially
+d3.select('#merge-column-selection').style('display', 'none'); // Also hide merge selection initially
 d3.select('.fullscreen-navigation').style.display = 'none'; // Hide fullscreen nav initially
 
-// Navigation event handlers - regular mode
-d3.select("#prev-btn").on("click", () => {
-    const displayPoints = +d3.select("#display-points").property("value");
-    currentStartIndex = Math.max(0, currentStartIndex - displayPoints);
-    updateVisualization();
-});
-
-d3.select("#next-btn").on("click", () => {
-    const displayPoints = +d3.select("#display-points").property("value");
-    if (currentStartIndex + displayPoints < fullData.length) {
-        currentStartIndex += displayPoints;
+    // Navigation event handlers - regular mode
+    d3.select("#prev-btn").on("click", () => {
+        const displayPoints = +d3.select("#display-points").property("value");
+        currentStartIndex = Math.max(0, currentStartIndex - displayPoints);
         updateVisualization();
-    }
-});
+    });
+
+    d3.select("#next-btn").on("click", () => {
+        const displayPoints = +d3.select("#display-points").property("value");
+        if (currentStartIndex + displayPoints < fullData.length) {
+            currentStartIndex += displayPoints;
+            updateVisualization();
+        }
+    });
     
-// Navigation event handlers - fullscreen mode
-d3.select("#fullscreen-prev-btn").on("click", () => {
-    const displayPoints = +d3.select("#display-points").property("value");
-    currentStartIndex = Math.max(0, currentStartIndex - displayPoints);
-    updateVisualization();
-});
-
-d3.select("#fullscreen-next-btn").on("click", () => {
-    const displayPoints = +d3.select("#display-points").property("value");
-    if (currentStartIndex + displayPoints < fullData.length) {
-        currentStartIndex += displayPoints;
+    // Navigation event handlers - fullscreen mode
+    d3.select("#fullscreen-prev-btn").on("click", () => {
+        const displayPoints = +d3.select("#display-points").property("value");
+        currentStartIndex = Math.max(0, currentStartIndex - displayPoints);
         updateVisualization();
-    }
-});
+    });
 
-// Add event listeners to dropdowns and display points input
-d3.select("#x-axis-select").on("change", updateVisualization);
-d3.select("#y-axis-select").on("change", updateVisualization);
-d3.select("#color-column-select").on("change", updateVisualization);
-d3.select("#display-points").on("change", () => {
-    currentStartIndex = 0;  // Reset to beginning when changing display points
-    updateVisualization();
-}); 
+    d3.select("#fullscreen-next-btn").on("click", () => {
+        const displayPoints = +d3.select("#display-points").property("value");
+        if (currentStartIndex + displayPoints < fullData.length) {
+            currentStartIndex += displayPoints;
+            updateVisualization();
+        }
+    });
+
+    // Add event listeners to dropdowns and display points input
+    d3.select("#x-axis-select").on("change", updateVisualization);
+    d3.select("#y-axis-select").on("change", updateVisualization);
+    d3.select("#color-column-select").on("change", updateVisualization);
+    d3.select("#display-points").on("change", () => {
+        currentStartIndex = 0;  // Reset to beginning when changing display points
+        updateVisualization();
+    });
+    d3.select("#color-intensity-input").on("change", updateVisualization); // Add listener for intensity input 
+    d3.select("#y-grid-interval").on("change", updateVisualization); // Add listener for grid interval 
